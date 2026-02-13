@@ -383,6 +383,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <div class="container">
   <h1>izi</h1>
   <p class="subtitle">Transcricao de video local com Whisper</p>
+  <div id="jscheck" style="background:#7f1d1d;color:#fca5a5;padding:10px;border-radius:8px;margin-bottom:12px;font-size:0.85rem;">
+    &#9888; JavaScript nao carregou. Tente Ctrl+F5 para recarregar.
+  </div>
+  <div id="jserror" style="display:none;background:#7f1d1d;color:#fca5a5;padding:10px;border-radius:8px;margin-bottom:12px;font-size:0.85rem;white-space:pre-wrap;"></div>
 
   <div class="card">
     <div class="card-title">Videos</div>
@@ -428,8 +432,16 @@ HTML_PAGE = r"""<!DOCTYPE html>
 </div>
 
 <script>
+window.onerror = function(msg, url, line) {
+  var d = document.getElementById("jserror");
+  if (d) { d.style.display = "block"; d.textContent = "Erro JS: " + msg + " (linha " + line + ")"; }
+};
 (function() {
   "use strict";
+
+  // Esconder aviso - JS esta funcionando
+  var jscheck = document.getElementById("jscheck");
+  if (jscheck) jscheck.style.display = "none";
 
   var fileInput = document.getElementById("fileInput");
   var dropzone = document.getElementById("dropzone");
