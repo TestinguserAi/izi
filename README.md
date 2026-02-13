@@ -1,6 +1,6 @@
 # izi — Transcritor de Vídeo Local
 
-Transcrição automática de vídeos usando OpenAI Whisper. Interface gráfica minimalista, roda 100% local.
+Transcrição automática de vídeos usando OpenAI Whisper. Interface web minimalista que abre no navegador, roda 100% local.
 
 ## Instalação
 
@@ -22,18 +22,21 @@ brew install ffmpeg
 pip install -r requirements.txt
 ```
 
-> No Linux, se o tkinter não estiver disponível: `sudo apt install python3-tk`
-
 ## Uso
 
 ```bash
 python izi.py
 ```
 
-1. Clique em **Adicionar Vídeos** e selecione os arquivos
+O navegador abre automaticamente em `http://localhost:5000`.
+
+1. Arraste vídeos para a área de upload (ou clique para selecionar)
 2. Escolha o **modelo** Whisper (base é um bom padrão)
 3. Clique em **INICIAR TRANSCRIÇÃO**
-4. Um `.txt` é criado para cada vídeo na pasta de saída
+4. Acompanhe o progresso em tempo real
+5. Baixe os arquivos `.txt` quando pronto
+
+As transcrições também ficam salvas em `~/Transcricoes`.
 
 ## Modelos Whisper
 

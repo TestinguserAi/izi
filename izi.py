@@ -1,16 +1,18 @@
 """
 izi — Transcritor de Vídeo Local usando Whisper
-Aplicação minimalista com interface gráfica para transcrever vídeos em texto.
+Interface web minimalista. Rode: python izi.py → abre no navegador.
 """
 
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
-import threading
-import queue
-import shutil
 import os
 import sys
+import shutil
+import threading
 import time
+import uuid
+import webbrowser
+from pathlib import Path
+
+from flask import Flask, request, jsonify, send_file, Response
 
 # ─── Verificar dependências ─────────────────────────────────────
 
@@ -21,341 +23,641 @@ try:
 except ImportError:
     pass
 
-SUPPORTED_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.mpg', '.mpeg', '.wmv', '.flv')
+SUPPORTED_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.mpg', '.mpeg', '.wmv', '.flv'}
 MODELS = ['tiny', 'base', 'small', 'medium', 'large']
+
+UPLOAD_DIR = os.path.join(os.path.expanduser("~"), ".izi_uploads")
+OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "Transcricoes")
 
 
 def check_dependencies():
-    """Verifica se whisper e ffmpeg estão instalados."""
     errors = []
     if not WHISPER_AVAILABLE:
-        errors.append("openai-whisper não está instalado.\n  → Rode: pip install openai-whisper")
+        errors.append("openai-whisper não está instalado. Rode: pip install openai-whisper")
     if not shutil.which("ffmpeg"):
-        errors.append("ffmpeg não encontrado no sistema.\n  → Linux: sudo apt install ffmpeg\n  → Mac: brew install ffmpeg\n  → Windows: https://ffmpeg.org/download.html")
+        errors.append("ffmpeg não encontrado. Linux: sudo apt install ffmpeg | Mac: brew install ffmpeg")
     return errors
 
 
-# ─── Cores ───────────────────────────────────────────────────────
+# ─── Estado global da transcrição ────────────────────────────────
 
-BG = '#1a1b2e'
-BG_CARD = '#232540'
-BG_INPUT = '#2a2d4a'
-ACCENT = '#6c63ff'
-ACCENT_HOVER = '#5a52e0'
-SUCCESS = '#4ade80'
-WARNING = '#fbbf24'
-ERROR = '#f87171'
-TEXT = '#e2e8f0'
-TEXT_DIM = '#94a3b8'
-TEXT_BRIGHT = '#ffffff'
-BORDER = '#3d4066'
+state = {
+    "files": [],           # lista de {"id": str, "name": str, "path": str}
+    "is_processing": False,
+    "progress": [],        # log de mensagens
+    "current": 0,
+    "total": 0,
+    "status": "idle",      # idle | processing | done | error
+    "results": [],         # lista de {"name": str, "filename": str}
+}
+state_lock = threading.Lock()
+
+loaded_model = None
+loaded_model_name = None
 
 
-# ─── Aplicação ───────────────────────────────────────────────────
+def add_log(msg):
+    with state_lock:
+        state["progress"].append(msg)
 
-class TranscriberApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("izi — Transcritor de Vídeo")
-        self.root.configure(bg=BG)
-        self.root.minsize(560, 520)
 
-        # Centralizar janela
-        w, h = 560, 520
-        x = (self.root.winfo_screenwidth() // 2) - (w // 2)
-        y = (self.root.winfo_screenheight() // 2) - (h // 2)
-        self.root.geometry(f"{w}x{h}+{x}+{y}")
+# ─── Flask app ───────────────────────────────────────────────────
 
-        # Estado
-        self.files = []
-        self.is_processing = False
-        self.loaded_model = None
-        self.loaded_model_name = None
-        self.msg_queue = queue.Queue()
+app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 4 * 1024 * 1024 * 1024  # 4GB
 
-        self._build_ui()
-        self._poll_messages()
 
-    def _build_ui(self):
-        container = tk.Frame(self.root, bg=BG, padx=24, pady=16)
-        container.pack(fill="both", expand=True)
+@app.route("/")
+def index():
+    return HTML_PAGE
 
-        # ── Título ──
-        tk.Label(
-            container, text="izi", font=("Segoe UI", 20, "bold"),
-            fg=TEXT_BRIGHT, bg=BG,
-        ).pack(anchor="w")
-        tk.Label(
-            container, text="Transcrição de vídeo com Whisper",
-            font=("Segoe UI", 10), fg=TEXT_DIM, bg=BG,
-        ).pack(anchor="w", pady=(0, 12))
 
-        # ── Caixa de Arquivos ──
-        file_frame = tk.Frame(container, bg=BG_CARD, padx=16, pady=12,
-                              highlightbackground=BORDER, highlightthickness=1)
-        file_frame.pack(fill="x", pady=(0, 10))
+@app.route("/upload", methods=["POST"])
+def upload():
+    if "files" not in request.files:
+        return jsonify({"error": "Nenhum arquivo enviado"}), 400
 
-        header = tk.Frame(file_frame, bg=BG_CARD)
-        header.pack(fill="x", pady=(0, 8))
-        tk.Label(header, text="Vídeos", font=("Segoe UI", 11, "bold"),
-                 fg=TEXT, bg=BG_CARD).pack(side="left")
-        self.lbl_count = tk.Label(header, text="0 arquivos", font=("Segoe UI", 9),
-                                  fg=TEXT_DIM, bg=BG_CARD)
-        self.lbl_count.pack(side="right")
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    uploaded = []
 
-        list_frame = tk.Frame(file_frame, bg=BG_INPUT,
-                              highlightbackground=BORDER, highlightthickness=1)
-        list_frame.pack(fill="x", pady=(0, 8))
-        self.file_listbox = tk.Listbox(
-            list_frame, height=6, bg=BG_INPUT, fg=TEXT, font=("Consolas", 9),
-            selectbackground=ACCENT, selectforeground=TEXT_BRIGHT,
-            borderwidth=0, highlightthickness=0, activestyle="none",
-        )
-        self.file_listbox.pack(fill="x", padx=4, pady=4)
+    for f in request.files.getlist("files"):
+        ext = os.path.splitext(f.filename)[1].lower()
+        if ext not in SUPPORTED_EXTENSIONS:
+            continue
+        file_id = uuid.uuid4().hex[:8]
+        safe_name = f.filename
+        save_path = os.path.join(UPLOAD_DIR, f"{file_id}_{safe_name}")
+        f.save(save_path)
+        entry = {"id": file_id, "name": safe_name, "path": save_path}
+        uploaded.append(entry)
 
-        btn_row = tk.Frame(file_frame, bg=BG_CARD)
-        btn_row.pack(fill="x")
-        self._make_btn(btn_row, "Adicionar Vídeos", self._add_files).pack(side="left", padx=(0, 6))
-        self._make_btn(btn_row, "Limpar", self._clear_files).pack(side="left")
+    with state_lock:
+        state["files"].extend(uploaded)
 
-        # ── Configurações (linha compacta) ──
-        config_frame = tk.Frame(container, bg=BG_CARD, padx=16, pady=12,
-                                highlightbackground=BORDER, highlightthickness=1)
-        config_frame.pack(fill="x", pady=(0, 10))
+    return jsonify({"uploaded": [{"id": e["id"], "name": e["name"]} for e in uploaded]})
 
-        row = tk.Frame(config_frame, bg=BG_CARD)
-        row.pack(fill="x")
 
-        # Modelo
-        tk.Label(row, text="Modelo:", font=("Segoe UI", 9), fg=TEXT_DIM,
-                 bg=BG_CARD).pack(side="left")
-        self.model_var = tk.StringVar(value="base")
-        model_menu = ttk.Combobox(row, textvariable=self.model_var, values=MODELS,
-                                  state="readonly", font=("Segoe UI", 10), width=8)
-        model_menu.pack(side="left", padx=(4, 16))
+@app.route("/remove/<file_id>", methods=["DELETE"])
+def remove_file(file_id):
+    with state_lock:
+        found = None
+        for f in state["files"]:
+            if f["id"] == file_id:
+                found = f
+                break
+        if found:
+            state["files"].remove(found)
+            try:
+                os.remove(found["path"])
+            except OSError:
+                pass
+    return jsonify({"ok": True})
 
-        # Pasta de saída
-        tk.Label(row, text="Saída:", font=("Segoe UI", 9), fg=TEXT_DIM,
-                 bg=BG_CARD).pack(side="left")
-        self.output_dir = os.path.join(os.path.expanduser("~"), "Transcricoes")
-        self.lbl_output = tk.Label(row, text=self._short_path(self.output_dir),
-                                   font=("Consolas", 9), fg=TEXT, bg=BG_CARD)
-        self.lbl_output.pack(side="left", padx=(4, 8))
-        self._make_btn(row, "Alterar", self._pick_output_dir).pack(side="left")
 
-        # ── Progresso ──
-        prog_frame = tk.Frame(container, bg=BG_CARD, padx=16, pady=12,
-                              highlightbackground=BORDER, highlightthickness=1)
-        prog_frame.pack(fill="both", expand=True, pady=(0, 10))
+@app.route("/clear", methods=["POST"])
+def clear_files():
+    with state_lock:
+        for f in state["files"]:
+            try:
+                os.remove(f["path"])
+            except OSError:
+                pass
+        state["files"].clear()
+    return jsonify({"ok": True})
 
-        self.lbl_status = tk.Label(prog_frame, text="Pronto", font=("Segoe UI", 10),
-                                   fg=TEXT_DIM, bg=BG_CARD)
-        self.lbl_status.pack(anchor="w", pady=(0, 4))
 
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("izi.Horizontal.TProgressbar", troughcolor=BG_INPUT,
-                        background=ACCENT, borderwidth=0)
-        self.progress = ttk.Progressbar(prog_frame, style="izi.Horizontal.TProgressbar",
-                                        mode="determinate")
-        self.progress.pack(fill="x", pady=(0, 6))
+@app.route("/transcribe", methods=["POST"])
+def transcribe():
+    with state_lock:
+        if state["is_processing"]:
+            return jsonify({"error": "Já em processamento"}), 409
+        if not state["files"]:
+            return jsonify({"error": "Nenhum arquivo adicionado"}), 400
 
-        log_frame = tk.Frame(prog_frame, bg=BG_INPUT,
-                             highlightbackground=BORDER, highlightthickness=1)
-        log_frame.pack(fill="both", expand=True)
-        self.log_text = tk.Text(
-            log_frame, height=5, bg=BG_INPUT, fg=TEXT, font=("Consolas", 9),
-            borderwidth=0, highlightthickness=0, wrap="word", state="disabled",
-        )
-        self.log_text.pack(fill="both", expand=True, padx=4, pady=4)
+    data = request.get_json(silent=True) or {}
+    model_name = data.get("model", "base")
+    if model_name not in MODELS:
+        model_name = "base"
 
-        # ── Botão Iniciar ──
-        self.btn_start = tk.Button(
-            container, text="INICIAR TRANSCRIÇÃO", font=("Segoe UI", 11, "bold"),
-            bg=ACCENT, fg=TEXT_BRIGHT, activebackground=ACCENT_HOVER,
-            activeforeground=TEXT_BRIGHT, borderwidth=0, cursor="hand2",
-            command=self._start_transcription,
-        )
-        self.btn_start.pack(fill="x", ipady=10)
+    errors = check_dependencies()
+    if errors:
+        return jsonify({"error": "\n".join(errors)}), 500
 
-    # ─── Helpers de UI ───────────────────────────────────────────
+    with state_lock:
+        state["is_processing"] = True
+        state["status"] = "processing"
+        state["progress"] = []
+        state["results"] = []
+        state["current"] = 0
+        state["total"] = len(state["files"])
+        files_snapshot = list(state["files"])
 
-    def _make_btn(self, parent, text, command):
-        return tk.Button(
-            parent, text=text, font=("Segoe UI", 9), bg=BG_INPUT, fg=TEXT,
-            activebackground=BORDER, activeforeground=TEXT_BRIGHT,
-            borderwidth=0, cursor="hand2", padx=12, pady=4, command=command,
-        )
+    thread = threading.Thread(
+        target=transcribe_worker,
+        args=(files_snapshot, model_name),
+        daemon=True,
+    )
+    thread.start()
+    return jsonify({"started": True, "total": len(files_snapshot)})
 
-    def _short_path(self, path):
-        home = os.path.expanduser("~")
-        if path.startswith(home):
-            return "~" + path[len(home):]
-        return path
 
-    def _log(self, msg):
-        self.log_text.configure(state="normal")
-        self.log_text.insert("end", msg + "\n")
-        self.log_text.see("end")
-        self.log_text.configure(state="disabled")
+@app.route("/status")
+def get_status():
+    with state_lock:
+        return jsonify({
+            "status": state["status"],
+            "current": state["current"],
+            "total": state["total"],
+            "progress": list(state["progress"]),
+            "results": list(state["results"]),
+            "files": [{"id": f["id"], "name": f["name"]} for f in state["files"]],
+        })
 
-    def _update_count(self):
-        n = len(self.files)
-        self.lbl_count.configure(text=f"{n} arquivo(s)" if n else "0 arquivos")
 
-    # ─── Ações de arquivo ────────────────────────────────────────
+@app.route("/download/<filename>")
+def download(filename):
+    filepath = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.isfile(filepath):
+        return jsonify({"error": "Arquivo não encontrado"}), 404
+    return send_file(filepath, as_attachment=True)
 
-    def _add_files(self):
-        filetypes = [
-            ("Vídeos", " ".join(f"*{ext}" for ext in SUPPORTED_EXTENSIONS)),
-            ("Todos os arquivos", "*.*"),
-        ]
-        selected = filedialog.askopenfilenames(title="Selecionar vídeos", filetypes=filetypes)
-        if selected:
-            added = 0
-            for f in selected:
-                if f not in self.files:
-                    self.files.append(f)
-                    self.file_listbox.insert("end", f"  {os.path.basename(f)}")
-                    added += 1
-            self._update_count()
-            if added:
-                self._log(f"+ {added} vídeo(s) adicionado(s)")
 
-    def _clear_files(self):
-        self.files.clear()
-        self.file_listbox.delete(0, "end")
-        self._update_count()
+# ─── Worker de transcrição ───────────────────────────────────────
 
-    def _pick_output_dir(self):
-        folder = filedialog.askdirectory(title="Pasta de saída")
-        if folder:
-            self.output_dir = folder
-            self.lbl_output.configure(text=self._short_path(folder))
+def transcribe_worker(files, model_name):
+    global loaded_model, loaded_model_name
 
-    # ─── Thread-safe message polling ─────────────────────────────
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    def _poll_messages(self):
+    # Carregar modelo
+    if loaded_model is None or loaded_model_name != model_name:
+        add_log(f"⏳ Carregando modelo '{model_name}'...")
         try:
-            while True:
-                msg = self.msg_queue.get_nowait()
-                self._handle_message(msg)
-        except queue.Empty:
+            loaded_model = whisper.load_model(model_name)
+            loaded_model_name = model_name
+            add_log(f"✅ Modelo '{model_name}' pronto.")
+        except Exception as e:
+            add_log(f"❌ Erro ao carregar modelo: {e}")
+            with state_lock:
+                state["is_processing"] = False
+                state["status"] = "error"
+            return
+
+    model = loaded_model
+    total = len(files)
+    successes = 0
+    t_start = time.time()
+
+    for i, file_info in enumerate(files, 1):
+        name = file_info["name"]
+        filepath = file_info["path"]
+
+        with state_lock:
+            state["current"] = i
+
+        add_log(f"🎬 [{i}/{total}] Transcrevendo: {name}")
+
+        try:
+            result = model.transcribe(filepath)
+            text = result["text"].strip()
+
+            out_name = os.path.splitext(name)[0] + ".txt"
+            out_path = os.path.join(OUTPUT_DIR, out_name)
+
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(text)
+
+            add_log(f"   ✅ Salvo: {out_name}")
+            with state_lock:
+                state["results"].append({"name": name, "filename": out_name})
+            successes += 1
+        except Exception as e:
+            add_log(f"   ❌ Erro: {e}")
+
+    # Limpar uploads
+    for file_info in files:
+        try:
+            os.remove(file_info["path"])
+        except OSError:
             pass
-        self.root.after(100, self._poll_messages)
 
-    def _handle_message(self, msg):
-        action = msg.get("action")
-        if action == "log":
-            self._log(msg["text"])
-        elif action == "status":
-            self.lbl_status.configure(text=msg["text"], fg=msg.get("color", TEXT_DIM))
-        elif action == "progress":
-            self.progress["value"] = msg["value"]
-        elif action == "done":
-            self.is_processing = False
-            self.btn_start.configure(state="normal")
-            output = msg.get("output_dir", self.output_dir)
-            self._ask_open_folder(output)
+    elapsed = time.time() - t_start
+    mins = int(elapsed // 60)
+    secs = int(elapsed % 60)
+    add_log(f"\n🏁 Concluído: {successes}/{total} em {mins}min {secs}s")
+    add_log(f"📁 Pasta: {OUTPUT_DIR}")
 
-    def _ask_open_folder(self, folder):
-        resp = messagebox.askyesno(
-            "Transcrição Concluída",
-            f"Transcrições salvas em:\n{folder}\n\nDeseja abrir a pasta?",
-        )
-        if resp:
-            if sys.platform == "win32":
-                os.startfile(folder)
-            elif sys.platform == "darwin":
-                os.system(f'open "{folder}"')
-            else:
-                os.system(f'xdg-open "{folder}"')
+    with state_lock:
+        state["is_processing"] = False
+        state["status"] = "done"
+        state["files"].clear()
 
-    # ─── Transcrição ─────────────────────────────────────────────
 
-    def _start_transcription(self):
-        if self.is_processing:
-            return
-        if not self.files:
-            messagebox.showwarning("Aviso", "Adicione pelo menos um vídeo.")
-            return
+# ─── HTML da interface ───────────────────────────────────────────
 
-        errors = check_dependencies()
-        if errors:
-            messagebox.showerror("Dependências", "\n\n".join(errors))
-            return
+HTML_PAGE = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>izi — Transcritor de Vídeo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #1a1b2e;
+    color: #e2e8f0;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 40px 20px;
+  }
+  .container { width: 100%; max-width: 640px; }
 
-        self.is_processing = True
-        self.btn_start.configure(state="disabled")
+  h1 { font-size: 2rem; color: #fff; margin-bottom: 2px; }
+  .subtitle { color: #94a3b8; font-size: 0.9rem; margin-bottom: 24px; }
 
-        # Snapshot de estado para a thread
-        files = list(self.files)
-        model_name = self.model_var.get()
-        output_dir = self.output_dir
+  .card {
+    background: #232540;
+    border: 1px solid #3d4066;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-size: 0.85rem;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 12px;
+  }
 
-        thread = threading.Thread(
-            target=self._transcribe_worker,
-            args=(files, model_name, output_dir),
-            daemon=True,
-        )
-        thread.start()
+  /* Drop zone */
+  .dropzone {
+    border: 2px dashed #3d4066;
+    border-radius: 10px;
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .dropzone:hover, .dropzone.dragover {
+    border-color: #6c63ff;
+    background: rgba(108,99,255,0.08);
+  }
+  .dropzone-icon { font-size: 2.5rem; margin-bottom: 8px; }
+  .dropzone-text { color: #94a3b8; font-size: 0.9rem; }
+  .dropzone-text strong { color: #6c63ff; }
 
-    def _transcribe_worker(self, files, model_name, output_dir):
-        """Executa em thread separada. Processa vídeos um a um."""
-        q = self.msg_queue
-        os.makedirs(output_dir, exist_ok=True)
+  /* File list */
+  .file-list { margin-top: 12px; }
+  .file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: #2a2d4a;
+    border-radius: 8px;
+    margin-bottom: 6px;
+    font-size: 0.85rem;
+  }
+  .file-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-item .remove {
+    background: none; border: none; color: #f87171; cursor: pointer;
+    font-size: 1.1rem; padding: 0 4px; margin-left: 8px;
+  }
+  .file-item .remove:hover { color: #ff4444; }
 
-        # Carregar modelo
-        if self.loaded_model is None or self.loaded_model_name != model_name:
-            q.put({"action": "status", "text": f"Carregando modelo '{model_name}'...", "color": WARNING})
-            q.put({"action": "log", "text": f"Carregando modelo '{model_name}'..."})
-            try:
-                self.loaded_model = whisper.load_model(model_name)
-                self.loaded_model_name = model_name
-                q.put({"action": "log", "text": f"Modelo '{model_name}' pronto."})
-            except Exception as e:
-                q.put({"action": "log", "text": f"Erro ao carregar modelo: {e}"})
-                q.put({"action": "status", "text": "Erro ao carregar modelo", "color": ERROR})
-                q.put({"action": "done", "output_dir": output_dir})
-                return
+  /* Config row */
+  .config-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .config-row label { color: #94a3b8; font-size: 0.85rem; }
+  .config-row select {
+    background: #2a2d4a;
+    color: #e2e8f0;
+    border: 1px solid #3d4066;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  .output-path {
+    font-family: 'Consolas', monospace;
+    font-size: 0.8rem;
+    color: #94a3b8;
+  }
 
-        model = self.loaded_model
-        total = len(files)
-        self.progress["maximum"] = total
-        successes = 0
-        t_start = time.time()
+  /* Buttons */
+  .btn-start {
+    width: 100%;
+    padding: 14px;
+    background: #6c63ff;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s;
+    letter-spacing: 0.02em;
+  }
+  .btn-start:hover { background: #5a52e0; }
+  .btn-start:disabled { background: #3d4066; cursor: not-allowed; }
 
-        for i, filepath in enumerate(files, 1):
-            name = os.path.basename(filepath)
-            q.put({"action": "status", "text": f"[{i}/{total}] {name}", "color": ACCENT})
-            q.put({"action": "log", "text": f"[{i}/{total}] {name}"})
+  .btn-clear {
+    background: none; border: 1px solid #3d4066; color: #94a3b8;
+    padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.8rem;
+  }
+  .btn-clear:hover { border-color: #f87171; color: #f87171; }
 
-            try:
-                result = model.transcribe(filepath)
-                text = result["text"].strip()
+  /* Progress */
+  .progress-bar-bg {
+    width: 100%;
+    height: 8px;
+    background: #2a2d4a;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: #6c63ff;
+    border-radius: 4px;
+    transition: width 0.3s;
+    width: 0%;
+  }
+  .status-text {
+    font-size: 0.85rem;
+    color: #94a3b8;
+    margin-bottom: 8px;
+  }
 
-                out_name = os.path.splitext(name)[0] + ".txt"
-                out_path = os.path.join(output_dir, out_name)
+  /* Log */
+  .log {
+    background: #1a1b2e;
+    border: 1px solid #3d4066;
+    border-radius: 8px;
+    padding: 12px;
+    font-family: 'Consolas', monospace;
+    font-size: 0.8rem;
+    max-height: 240px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    line-height: 1.5;
+    color: #94a3b8;
+  }
 
-                with open(out_path, "w", encoding="utf-8") as f:
-                    f.write(text)
+  /* Results */
+  .results { margin-top: 12px; }
+  .result-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: #2a2d4a;
+    border-radius: 8px;
+    margin-bottom: 6px;
+  }
+  .result-item .name { font-size: 0.85rem; }
+  .result-item a {
+    color: #6c63ff;
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .result-item a:hover { color: #5a52e0; }
 
-                elapsed = time.time() - t_start
-                q.put({"action": "log", "text": f"  -> {out_name}"})
-                successes += 1
-            except Exception as e:
-                q.put({"action": "log", "text": f"  ERRO: {e}"})
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>izi</h1>
+  <p class="subtitle">Transcrição de vídeo local com Whisper</p>
 
-            q.put({"action": "progress", "value": i})
+  <!-- Upload -->
+  <div class="card">
+    <div class="card-title">Vídeos</div>
+    <div class="dropzone" id="dropzone" onclick="fileInput.click()">
+      <div class="dropzone-icon">📂</div>
+      <div class="dropzone-text">Arraste vídeos aqui ou <strong>clique para selecionar</strong></div>
+    </div>
+    <input type="file" id="fileInput" multiple accept=".mp4,.mkv,.avi,.mov,.webm,.m4v,.mpg,.mpeg,.wmv,.flv" style="display:none">
+    <div class="file-list" id="fileList"></div>
+    <div style="margin-top:8px; text-align:right;">
+      <button class="btn-clear hidden" id="btnClear" onclick="clearFiles()">Limpar tudo</button>
+    </div>
+  </div>
 
-        # Resumo
-        elapsed = time.time() - t_start
-        mins = int(elapsed // 60)
-        secs = int(elapsed % 60)
-        q.put({"action": "log", "text": f"\nConcluído: {successes}/{total} em {mins}min {secs}s"})
-        q.put({"action": "log", "text": f"Pasta: {output_dir}"})
-        q.put({"action": "status", "text": f"Concluído! {successes}/{total}", "color": SUCCESS})
-        q.put({"action": "done", "output_dir": output_dir})
+  <!-- Config -->
+  <div class="card">
+    <div class="card-title">Configurações</div>
+    <div class="config-row">
+      <label>Modelo Whisper:</label>
+      <select id="modelSelect">
+        <option value="tiny">tiny (rápido, menos preciso)</option>
+        <option value="base" selected>base (equilibrado)</option>
+        <option value="small">small (boa qualidade)</option>
+        <option value="medium">medium (alta qualidade)</option>
+        <option value="large">large (máxima qualidade)</option>
+      </select>
+    </div>
+    <div style="margin-top:8px;">
+      <span class="output-path">📁 Saída: ~/Transcricoes</span>
+    </div>
+  </div>
+
+  <!-- Start -->
+  <button class="btn-start" id="btnStart" onclick="startTranscription()">
+    INICIAR TRANSCRIÇÃO
+  </button>
+
+  <!-- Progress -->
+  <div class="card hidden" id="progressCard" style="margin-top:16px;">
+    <div class="card-title">Progresso</div>
+    <div class="status-text" id="statusText">Aguardando...</div>
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill" id="progressBar"></div>
+    </div>
+    <div class="log" id="logArea"></div>
+    <div class="results" id="resultsArea"></div>
+  </div>
+</div>
+
+<script>
+const fileInput = document.getElementById('fileInput');
+const dropzone = document.getElementById('dropzone');
+const fileList = document.getElementById('fileList');
+const btnClear = document.getElementById('btnClear');
+const btnStart = document.getElementById('btnStart');
+const progressCard = document.getElementById('progressCard');
+const progressBar = document.getElementById('progressBar');
+const statusText = document.getElementById('statusText');
+const logArea = document.getElementById('logArea');
+const resultsArea = document.getElementById('resultsArea');
+const modelSelect = document.getElementById('modelSelect');
+
+let pollInterval = null;
+let lastLogLen = 0;
+
+// ─── Drag and drop ──────────────────────────────────────────────
+
+dropzone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropzone.classList.add('dragover');
+});
+dropzone.addEventListener('dragleave', () => {
+  dropzone.classList.remove('dragover');
+});
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropzone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) uploadFiles(fileInput.files);
+  fileInput.value = '';
+});
+
+// ─── Upload ─────────────────────────────────────────────────────
+
+async function uploadFiles(files) {
+  const form = new FormData();
+  for (const f of files) form.append('files', f);
+
+  btnStart.disabled = true;
+  btnStart.textContent = 'ENVIANDO...';
+
+  try {
+    const res = await fetch('/upload', { method: 'POST', body: form });
+    const data = await res.json();
+    if (data.uploaded) {
+      data.uploaded.forEach(f => addFileToList(f.id, f.name));
+    }
+  } catch (e) {
+    alert('Erro ao enviar arquivos: ' + e.message);
+  }
+
+  btnStart.disabled = false;
+  btnStart.textContent = 'INICIAR TRANSCRIÇÃO';
+}
+
+function addFileToList(id, name) {
+  const div = document.createElement('div');
+  div.className = 'file-item';
+  div.id = 'file-' + id;
+  div.innerHTML = `<span class="name">🎬 ${name}</span><button class="remove" onclick="removeFile('${id}')">&times;</button>`;
+  fileList.appendChild(div);
+  btnClear.classList.remove('hidden');
+}
+
+async function removeFile(id) {
+  await fetch('/remove/' + id, { method: 'DELETE' });
+  const el = document.getElementById('file-' + id);
+  if (el) el.remove();
+  if (!fileList.children.length) btnClear.classList.add('hidden');
+}
+
+async function clearFiles() {
+  await fetch('/clear', { method: 'POST' });
+  fileList.innerHTML = '';
+  btnClear.classList.add('hidden');
+}
+
+// ─── Transcrição ────────────────────────────────────────────────
+
+async function startTranscription() {
+  const model = modelSelect.value;
+
+  btnStart.disabled = true;
+  btnStart.textContent = 'PROCESSANDO...';
+  progressCard.classList.remove('hidden');
+  logArea.textContent = '';
+  resultsArea.innerHTML = '';
+  lastLogLen = 0;
+  statusText.textContent = 'Iniciando...';
+  progressBar.style.width = '0%';
+
+  try {
+    const res = await fetch('/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert(data.error);
+      btnStart.disabled = false;
+      btnStart.textContent = 'INICIAR TRANSCRIÇÃO';
+      return;
+    }
+    // Iniciar polling
+    pollInterval = setInterval(pollStatus, 800);
+  } catch (e) {
+    alert('Erro: ' + e.message);
+    btnStart.disabled = false;
+    btnStart.textContent = 'INICIAR TRANSCRIÇÃO';
+  }
+}
+
+async function pollStatus() {
+  try {
+    const res = await fetch('/status');
+    const data = await res.json();
+
+    // Progresso
+    if (data.total > 0) {
+      const pct = Math.round((data.current / data.total) * 100);
+      progressBar.style.width = pct + '%';
+      statusText.textContent = `[${data.current}/${data.total}] Processando...`;
+    }
+
+    // Log
+    if (data.progress.length > lastLogLen) {
+      const newLogs = data.progress.slice(lastLogLen);
+      logArea.textContent += newLogs.join('\\n') + '\\n';
+      logArea.scrollTop = logArea.scrollHeight;
+      lastLogLen = data.progress.length;
+    }
+
+    // Concluído
+    if (data.status === 'done' || data.status === 'error') {
+      clearInterval(pollInterval);
+      pollInterval = null;
+
+      progressBar.style.width = '100%';
+      statusText.textContent = data.status === 'done' ? 'Concluído!' : 'Erro na transcrição';
+      statusText.style.color = data.status === 'done' ? '#4ade80' : '#f87171';
+
+      btnStart.disabled = false;
+      btnStart.textContent = 'INICIAR TRANSCRIÇÃO';
+
+      // Mostrar resultados para download
+      if (data.results && data.results.length) {
+        resultsArea.innerHTML = '<div style="margin-top:12px; margin-bottom:6px; color:#94a3b8; font-size:0.8rem; text-transform:uppercase;">Downloads</div>';
+        data.results.forEach(r => {
+          const div = document.createElement('div');
+          div.className = 'result-item';
+          div.innerHTML = `<span class="name">📄 ${r.filename}</span><a href="/download/${encodeURIComponent(r.filename)}">Baixar</a>`;
+          resultsArea.appendChild(div);
+        });
+      }
+
+      // Limpar lista de arquivos (já foram processados)
+      fileList.innerHTML = '';
+      btnClear.classList.add('hidden');
+    }
+  } catch (e) {
+    // Ignora erros de polling
+  }
+}
+</script>
+</body>
+</html>"""
 
 
 # ─── Main ────────────────────────────────────────────────────────
@@ -363,15 +665,23 @@ class TranscriberApp:
 def main():
     errors = check_dependencies()
     if errors:
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showerror("Dependências Faltando", "\n\n".join(errors))
-        root.destroy()
-        return
+        print("=" * 50)
+        print("DEPENDÊNCIAS FALTANDO:")
+        for e in errors:
+            print(f"  • {e}")
+        print("=" * 50)
+        sys.exit(1)
 
-    root = tk.Tk()
-    TranscriberApp(root)
-    root.mainloop()
+    port = 5000
+    url = f"http://localhost:{port}"
+    print(f"\n  izi — Transcritor de Vídeo")
+    print(f"  Abrindo no navegador: {url}")
+    print(f"  Para parar: Ctrl+C\n")
+
+    # Abrir navegador após um breve delay (para dar tempo do servidor iniciar)
+    threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+
+    app.run(host="127.0.0.1", port=port, debug=False)
 
 
 if __name__ == "__main__":
