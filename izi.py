@@ -666,11 +666,12 @@ def main():
     errors = check_dependencies()
     if errors:
         print("=" * 50)
-        print("DEPENDÊNCIAS FALTANDO:")
+        print("  AVISO — Dependências:")
         for e in errors:
             print(f"  • {e}")
+        print("  A interface vai abrir, mas a transcrição não")
+        print("  funcionará até instalar o que falta.")
         print("=" * 50)
-        sys.exit(1)
 
     port = 5000
     url = f"http://localhost:{port}"
