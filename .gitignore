@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Media files
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.webm
+*.m4v
+*.mpg
+*.mpeg
+*.wmv
+*.flv
+*.mp3
+*.wav
+*.m4a
+
+# Transcription outputs (keep project txt files)
+Transcricoes/
