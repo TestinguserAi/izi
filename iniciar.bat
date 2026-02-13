@@ -1,5 +1,9 @@
 @echo off
 title izi — Transcritor de Video
+
+:: Ir para a pasta onde este .bat está (onde o izi.py está)
+cd /d "%~dp0"
+
 echo.
 echo   izi — Transcritor de Video
 echo   ============================
@@ -16,13 +20,13 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: Instalar dependências se necessário
+:: Instalar dependências (usa python -m pip, que sempre funciona)
 echo   Verificando dependencias...
-pip install flask openai-whisper >nul 2>&1
+python -m pip install flask openai-whisper -q 2>nul
 
 :: Rodar o app
 echo   Abrindo no navegador...
 echo   Para fechar, feche esta janela.
 echo.
-python "%~dp0izi.py"
+python izi.py
 pause
