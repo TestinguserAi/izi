@@ -6,6 +6,7 @@ Interface web minimalista. Rode: python izi.py → abre no navegador.
 import os
 import sys
 import shutil
+import subprocess
 import threading
 import time
 import uuid
@@ -30,12 +31,45 @@ UPLOAD_DIR = os.path.join(os.path.expanduser("~"), ".izi_uploads")
 OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "Transcricoes")
 
 
+def find_ffmpeg():
+    """Tenta encontrar o ffmpeg de várias formas (Windows costuma não ter no PATH)."""
+    # 1. Tentar pelo PATH normal
+    if shutil.which("ffmpeg"):
+        return True
+    # 2. Tentar executar diretamente
+    try:
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5)
+        return True
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+    # 3. No Windows, procurar em locais comuns
+    if sys.platform == "win32":
+        common_paths = [
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "ffmpeg", "bin"),
+            os.path.join(os.environ.get("PROGRAMFILES", ""), "ffmpeg", "bin"),
+            os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "ffmpeg", "bin"),
+            r"C:\ffmpeg\bin",
+            os.path.join(os.path.expanduser("~"), "ffmpeg", "bin"),
+            os.path.join(os.path.expanduser("~"), "scoop", "shims"),
+        ]
+        for p in common_paths:
+            ffmpeg_exe = os.path.join(p, "ffmpeg.exe")
+            if os.path.isfile(ffmpeg_exe):
+                # Adicionar ao PATH para o Whisper conseguir usar
+                os.environ["PATH"] = p + os.pathsep + os.environ.get("PATH", "")
+                return True
+    return False
+
+
 def check_dependencies():
     errors = []
     if not WHISPER_AVAILABLE:
         errors.append("openai-whisper não está instalado. Rode: pip install openai-whisper")
-    if not shutil.which("ffmpeg"):
-        errors.append("ffmpeg não encontrado. Linux: sudo apt install ffmpeg | Mac: brew install ffmpeg")
+    if not find_ffmpeg():
+        errors.append("ffmpeg não encontrado. Instale e reinicie o computador.\n"
+                       "  Windows: winget install ffmpeg\n"
+                       "  Linux: sudo apt install ffmpeg\n"
+                       "  Mac: brew install ffmpeg")
     return errors
 
 
