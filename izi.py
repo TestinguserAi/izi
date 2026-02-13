@@ -253,12 +253,12 @@ def transcribe_worker(files, model_name):
 
 # ─── HTML da interface ───────────────────────────────────────────
 
-HTML_PAGE = """<!DOCTYPE html>
+HTML_PAGE = r"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>izi — Transcritor de Vídeo</title>
+<title>izi</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -290,7 +290,6 @@ HTML_PAGE = """<!DOCTYPE html>
     margin-bottom: 12px;
   }
 
-  /* Drop zone */
   .dropzone {
     border: 2px dashed #3d4066;
     border-radius: 10px;
@@ -307,7 +306,6 @@ HTML_PAGE = """<!DOCTYPE html>
   .dropzone-text { color: #94a3b8; font-size: 0.9rem; }
   .dropzone-text strong { color: #6c63ff; }
 
-  /* File list */
   .file-list { margin-top: 12px; }
   .file-item {
     display: flex;
@@ -326,42 +324,20 @@ HTML_PAGE = """<!DOCTYPE html>
   }
   .file-item .remove:hover { color: #ff4444; }
 
-  /* Config row */
   .config-row {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-wrap: wrap;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
   }
   .config-row label { color: #94a3b8; font-size: 0.85rem; }
   .config-row select {
-    background: #2a2d4a;
-    color: #e2e8f0;
-    border: 1px solid #3d4066;
-    border-radius: 6px;
-    padding: 6px 12px;
-    font-size: 0.9rem;
-    cursor: pointer;
+    background: #2a2d4a; color: #e2e8f0; border: 1px solid #3d4066;
+    border-radius: 6px; padding: 6px 12px; font-size: 0.9rem; cursor: pointer;
   }
-  .output-path {
-    font-family: 'Consolas', monospace;
-    font-size: 0.8rem;
-    color: #94a3b8;
-  }
+  .output-path { font-family: 'Consolas', monospace; font-size: 0.8rem; color: #94a3b8; }
 
-  /* Buttons */
   .btn-start {
-    width: 100%;
-    padding: 14px;
-    background: #6c63ff;
-    color: #fff;
-    border: none;
-    border-radius: 10px;
-    font-size: 1rem;
-    font-weight: 700;
-    cursor: pointer;
-    transition: background 0.2s;
-    letter-spacing: 0.02em;
+    width: 100%; padding: 14px; background: #6c63ff; color: #fff;
+    border: none; border-radius: 10px; font-size: 1rem; font-weight: 700;
+    cursor: pointer; transition: background 0.2s; letter-spacing: 0.02em;
   }
   .btn-start:hover { background: #5a52e0; }
   .btn-start:disabled { background: #3d4066; cursor: not-allowed; }
@@ -372,60 +348,31 @@ HTML_PAGE = """<!DOCTYPE html>
   }
   .btn-clear:hover { border-color: #f87171; color: #f87171; }
 
-  /* Progress */
   .progress-bar-bg {
-    width: 100%;
-    height: 8px;
-    background: #2a2d4a;
-    border-radius: 4px;
-    overflow: hidden;
-    margin-bottom: 12px;
+    width: 100%; height: 8px; background: #2a2d4a;
+    border-radius: 4px; overflow: hidden; margin-bottom: 12px;
   }
   .progress-bar-fill {
-    height: 100%;
-    background: #6c63ff;
-    border-radius: 4px;
-    transition: width 0.3s;
-    width: 0%;
+    height: 100%; background: #6c63ff; border-radius: 4px;
+    transition: width 0.3s; width: 0%;
   }
-  .status-text {
-    font-size: 0.85rem;
-    color: #94a3b8;
-    margin-bottom: 8px;
-  }
+  .status-text { font-size: 0.85rem; color: #94a3b8; margin-bottom: 8px; }
 
-  /* Log */
   .log {
-    background: #1a1b2e;
-    border: 1px solid #3d4066;
-    border-radius: 8px;
-    padding: 12px;
-    font-family: 'Consolas', monospace;
-    font-size: 0.8rem;
-    max-height: 240px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    line-height: 1.5;
-    color: #94a3b8;
+    background: #1a1b2e; border: 1px solid #3d4066; border-radius: 8px;
+    padding: 12px; font-family: 'Consolas', monospace; font-size: 0.8rem;
+    max-height: 240px; overflow-y: auto; white-space: pre-wrap;
+    line-height: 1.5; color: #94a3b8;
   }
 
-  /* Results */
   .results { margin-top: 12px; }
   .result-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px;
-    background: #2a2d4a;
-    border-radius: 8px;
-    margin-bottom: 6px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; background: #2a2d4a; border-radius: 8px; margin-bottom: 6px;
   }
   .result-item .name { font-size: 0.85rem; }
   .result-item a {
-    color: #6c63ff;
-    text-decoration: none;
-    font-size: 0.85rem;
-    font-weight: 600;
+    color: #6c63ff; text-decoration: none; font-size: 0.85rem; font-weight: 600;
   }
   .result-item a:hover { color: #5a52e0; }
 
@@ -435,46 +382,40 @@ HTML_PAGE = """<!DOCTYPE html>
 <body>
 <div class="container">
   <h1>izi</h1>
-  <p class="subtitle">Transcrição de vídeo local com Whisper</p>
+  <p class="subtitle">Transcricao de video local com Whisper</p>
 
-  <!-- Upload -->
   <div class="card">
-    <div class="card-title">Vídeos</div>
-    <div class="dropzone" id="dropzone" onclick="fileInput.click()">
-      <div class="dropzone-icon">📂</div>
-      <div class="dropzone-text">Arraste vídeos aqui ou <strong>clique para selecionar</strong></div>
+    <div class="card-title">Videos</div>
+    <div class="dropzone" id="dropzone">
+      <div class="dropzone-icon">&#128194;</div>
+      <div class="dropzone-text">Arraste videos aqui ou <strong>clique para selecionar</strong></div>
     </div>
     <input type="file" id="fileInput" multiple accept=".mp4,.mkv,.avi,.mov,.webm,.m4v,.mpg,.mpeg,.wmv,.flv" style="display:none">
     <div class="file-list" id="fileList"></div>
     <div style="margin-top:8px; text-align:right;">
-      <button class="btn-clear hidden" id="btnClear" onclick="clearFiles()">Limpar tudo</button>
+      <button class="btn-clear hidden" id="btnClear">Limpar tudo</button>
     </div>
   </div>
 
-  <!-- Config -->
   <div class="card">
-    <div class="card-title">Configurações</div>
+    <div class="card-title">Configuracoes</div>
     <div class="config-row">
       <label>Modelo Whisper:</label>
       <select id="modelSelect">
-        <option value="tiny">tiny (rápido, menos preciso)</option>
+        <option value="tiny">tiny (rapido, menos preciso)</option>
         <option value="base" selected>base (equilibrado)</option>
         <option value="small">small (boa qualidade)</option>
         <option value="medium">medium (alta qualidade)</option>
-        <option value="large">large (máxima qualidade)</option>
+        <option value="large">large (maxima qualidade)</option>
       </select>
     </div>
     <div style="margin-top:8px;">
-      <span class="output-path">📁 Saída: ~/Transcricoes</span>
+      <span class="output-path">&#128193; Saida: ~/Transcricoes</span>
     </div>
   </div>
 
-  <!-- Start -->
-  <button class="btn-start" id="btnStart" onclick="startTranscription()">
-    INICIAR TRANSCRIÇÃO
-  </button>
+  <button class="btn-start" id="btnStart">INICIAR TRANSCRICAO</button>
 
-  <!-- Progress -->
   <div class="card hidden" id="progressCard" style="margin-top:16px;">
     <div class="card-title">Progresso</div>
     <div class="status-text" id="statusText">Aguardando...</div>
@@ -487,172 +428,201 @@ HTML_PAGE = """<!DOCTYPE html>
 </div>
 
 <script>
-const fileInput = document.getElementById('fileInput');
-const dropzone = document.getElementById('dropzone');
-const fileList = document.getElementById('fileList');
-const btnClear = document.getElementById('btnClear');
-const btnStart = document.getElementById('btnStart');
-const progressCard = document.getElementById('progressCard');
-const progressBar = document.getElementById('progressBar');
-const statusText = document.getElementById('statusText');
-const logArea = document.getElementById('logArea');
-const resultsArea = document.getElementById('resultsArea');
-const modelSelect = document.getElementById('modelSelect');
+(function() {
+  "use strict";
 
-let pollInterval = null;
-let lastLogLen = 0;
+  var fileInput = document.getElementById("fileInput");
+  var dropzone = document.getElementById("dropzone");
+  var fileList = document.getElementById("fileList");
+  var btnClear = document.getElementById("btnClear");
+  var btnStart = document.getElementById("btnStart");
+  var progressCard = document.getElementById("progressCard");
+  var progressBar = document.getElementById("progressBar");
+  var statusText = document.getElementById("statusText");
+  var logArea = document.getElementById("logArea");
+  var resultsArea = document.getElementById("resultsArea");
+  var modelSelect = document.getElementById("modelSelect");
 
-// ─── Drag and drop ──────────────────────────────────────────────
+  var pollInterval = null;
+  var lastLogLen = 0;
 
-dropzone.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  dropzone.classList.add('dragover');
-});
-dropzone.addEventListener('dragleave', () => {
-  dropzone.classList.remove('dragover');
-});
-dropzone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropzone.classList.remove('dragover');
-  if (e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
-});
-fileInput.addEventListener('change', () => {
-  if (fileInput.files.length) uploadFiles(fileInput.files);
-  fileInput.value = '';
-});
+  // ── Clique na dropzone abre seletor de arquivo ──
+  dropzone.addEventListener("click", function() {
+    fileInput.click();
+  });
 
-// ─── Upload ─────────────────────────────────────────────────────
+  // ── Drag and drop ──
+  dropzone.addEventListener("dragover", function(e) {
+    e.preventDefault();
+    dropzone.classList.add("dragover");
+  });
+  dropzone.addEventListener("dragleave", function() {
+    dropzone.classList.remove("dragover");
+  });
+  dropzone.addEventListener("drop", function(e) {
+    e.preventDefault();
+    dropzone.classList.remove("dragover");
+    if (e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
+  });
 
-async function uploadFiles(files) {
-  const form = new FormData();
-  for (const f of files) form.append('files', f);
+  // ── Seletor de arquivo ──
+  fileInput.addEventListener("change", function() {
+    if (fileInput.files.length) uploadFiles(fileInput.files);
+    fileInput.value = "";
+  });
 
-  btnStart.disabled = true;
-  btnStart.textContent = 'ENVIANDO...';
-
-  try {
-    const res = await fetch('/upload', { method: 'POST', body: form });
-    const data = await res.json();
-    if (data.uploaded) {
-      data.uploaded.forEach(f => addFileToList(f.id, f.name));
-    }
-  } catch (e) {
-    alert('Erro ao enviar arquivos: ' + e.message);
-  }
-
-  btnStart.disabled = false;
-  btnStart.textContent = 'INICIAR TRANSCRIÇÃO';
-}
-
-function addFileToList(id, name) {
-  const div = document.createElement('div');
-  div.className = 'file-item';
-  div.id = 'file-' + id;
-  div.innerHTML = `<span class="name">🎬 ${name}</span><button class="remove" onclick="removeFile('${id}')">&times;</button>`;
-  fileList.appendChild(div);
-  btnClear.classList.remove('hidden');
-}
-
-async function removeFile(id) {
-  await fetch('/remove/' + id, { method: 'DELETE' });
-  const el = document.getElementById('file-' + id);
-  if (el) el.remove();
-  if (!fileList.children.length) btnClear.classList.add('hidden');
-}
-
-async function clearFiles() {
-  await fetch('/clear', { method: 'POST' });
-  fileList.innerHTML = '';
-  btnClear.classList.add('hidden');
-}
-
-// ─── Transcrição ────────────────────────────────────────────────
-
-async function startTranscription() {
-  const model = modelSelect.value;
-
-  btnStart.disabled = true;
-  btnStart.textContent = 'PROCESSANDO...';
-  progressCard.classList.remove('hidden');
-  logArea.textContent = '';
-  resultsArea.innerHTML = '';
-  lastLogLen = 0;
-  statusText.textContent = 'Iniciando...';
-  progressBar.style.width = '0%';
-
-  try {
-    const res = await fetch('/transcribe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model }),
+  // ── Botao limpar ──
+  btnClear.addEventListener("click", function() {
+    fetch("/clear", { method: "POST" }).then(function() {
+      fileList.innerHTML = "";
+      btnClear.classList.add("hidden");
     });
-    const data = await res.json();
-    if (data.error) {
-      alert(data.error);
-      btnStart.disabled = false;
-      btnStart.textContent = 'INICIAR TRANSCRIÇÃO';
-      return;
+  });
+
+  // ── Botao iniciar ──
+  btnStart.addEventListener("click", function() {
+    startTranscription();
+  });
+
+  // ── Upload de arquivos ──
+  function uploadFiles(files) {
+    var form = new FormData();
+    for (var i = 0; i < files.length; i++) {
+      form.append("files", files[i]);
     }
-    // Iniciar polling
-    pollInterval = setInterval(pollStatus, 800);
-  } catch (e) {
-    alert('Erro: ' + e.message);
-    btnStart.disabled = false;
-    btnStart.textContent = 'INICIAR TRANSCRIÇÃO';
+
+    btnStart.disabled = true;
+    btnStart.textContent = "ENVIANDO...";
+
+    fetch("/upload", { method: "POST", body: form })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.uploaded) {
+          for (var i = 0; i < data.uploaded.length; i++) {
+            addFileToList(data.uploaded[i].id, data.uploaded[i].name);
+          }
+        }
+        btnStart.disabled = false;
+        btnStart.textContent = "INICIAR TRANSCRICAO";
+      })
+      .catch(function(e) {
+        alert("Erro ao enviar: " + e.message);
+        btnStart.disabled = false;
+        btnStart.textContent = "INICIAR TRANSCRICAO";
+      });
   }
-}
 
-async function pollStatus() {
-  try {
-    const res = await fetch('/status');
-    const data = await res.json();
+  function addFileToList(id, name) {
+    var div = document.createElement("div");
+    div.className = "file-item";
+    div.id = "file-" + id;
 
-    // Progresso
-    if (data.total > 0) {
-      const pct = Math.round((data.current / data.total) * 100);
-      progressBar.style.width = pct + '%';
-      statusText.textContent = `[${data.current}/${data.total}] Processando...`;
-    }
+    var span = document.createElement("span");
+    span.className = "name";
+    span.textContent = name;
 
-    // Log
-    if (data.progress.length > lastLogLen) {
-      const newLogs = data.progress.slice(lastLogLen);
-      logArea.textContent += newLogs.join('\\n') + '\\n';
-      logArea.scrollTop = logArea.scrollHeight;
-      lastLogLen = data.progress.length;
-    }
+    var btn = document.createElement("button");
+    btn.className = "remove";
+    btn.innerHTML = "&times;";
+    btn.addEventListener("click", function() {
+      fetch("/remove/" + id, { method: "DELETE" }).then(function() {
+        div.remove();
+        if (!fileList.children.length) btnClear.classList.add("hidden");
+      });
+    });
 
-    // Concluído
-    if (data.status === 'done' || data.status === 'error') {
-      clearInterval(pollInterval);
-      pollInterval = null;
+    div.appendChild(span);
+    div.appendChild(btn);
+    fileList.appendChild(div);
+    btnClear.classList.remove("hidden");
+  }
 
-      progressBar.style.width = '100%';
-      statusText.textContent = data.status === 'done' ? 'Concluído!' : 'Erro na transcrição';
-      statusText.style.color = data.status === 'done' ? '#4ade80' : '#f87171';
+  // ── Transcricao ──
+  function startTranscription() {
+    var model = modelSelect.value;
 
-      btnStart.disabled = false;
-      btnStart.textContent = 'INICIAR TRANSCRIÇÃO';
+    btnStart.disabled = true;
+    btnStart.textContent = "PROCESSANDO...";
+    progressCard.classList.remove("hidden");
+    logArea.textContent = "";
+    resultsArea.innerHTML = "";
+    lastLogLen = 0;
+    statusText.textContent = "Iniciando...";
+    progressBar.style.width = "0%";
 
-      // Mostrar resultados para download
-      if (data.results && data.results.length) {
-        resultsArea.innerHTML = '<div style="margin-top:12px; margin-bottom:6px; color:#94a3b8; font-size:0.8rem; text-transform:uppercase;">Downloads</div>';
-        data.results.forEach(r => {
-          const div = document.createElement('div');
-          div.className = 'result-item';
-          div.innerHTML = `<span class="name">📄 ${r.filename}</span><a href="/download/${encodeURIComponent(r.filename)}">Baixar</a>`;
-          resultsArea.appendChild(div);
-        });
+    fetch("/transcribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: model })
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      if (data.error) {
+        alert(data.error);
+        btnStart.disabled = false;
+        btnStart.textContent = "INICIAR TRANSCRICAO";
+        return;
       }
-
-      // Limpar lista de arquivos (já foram processados)
-      fileList.innerHTML = '';
-      btnClear.classList.add('hidden');
-    }
-  } catch (e) {
-    // Ignora erros de polling
+      pollInterval = setInterval(pollStatus, 800);
+    })
+    .catch(function(e) {
+      alert("Erro: " + e.message);
+      btnStart.disabled = false;
+      btnStart.textContent = "INICIAR TRANSCRICAO";
+    });
   }
-}
+
+  function pollStatus() {
+    fetch("/status")
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.total > 0) {
+          var pct = Math.round((data.current / data.total) * 100);
+          progressBar.style.width = pct + "%";
+          statusText.textContent = "[" + data.current + "/" + data.total + "] Processando...";
+        }
+
+        if (data.progress.length > lastLogLen) {
+          var newLogs = data.progress.slice(lastLogLen);
+          logArea.textContent += newLogs.join("\n") + "\n";
+          logArea.scrollTop = logArea.scrollHeight;
+          lastLogLen = data.progress.length;
+        }
+
+        if (data.status === "done" || data.status === "error") {
+          clearInterval(pollInterval);
+          pollInterval = null;
+
+          progressBar.style.width = "100%";
+          statusText.textContent = data.status === "done" ? "Concluido!" : "Erro na transcricao";
+          statusText.style.color = data.status === "done" ? "#4ade80" : "#f87171";
+
+          btnStart.disabled = false;
+          btnStart.textContent = "INICIAR TRANSCRICAO";
+
+          if (data.results && data.results.length) {
+            var header = document.createElement("div");
+            header.style.cssText = "margin-top:12px; margin-bottom:6px; color:#94a3b8; font-size:0.8rem; text-transform:uppercase;";
+            header.textContent = "Downloads";
+            resultsArea.appendChild(header);
+
+            for (var i = 0; i < data.results.length; i++) {
+              var r = data.results[i];
+              var row = document.createElement("div");
+              row.className = "result-item";
+              row.innerHTML = '<span class="name">' + r.filename + '</span><a href="/download/' + encodeURIComponent(r.filename) + '">Baixar</a>';
+              resultsArea.appendChild(row);
+            }
+          }
+
+          fileList.innerHTML = "";
+          btnClear.classList.add("hidden");
+        }
+      })
+      .catch(function() {});
+  }
+
+})();
 </script>
 </body>
 </html>"""
